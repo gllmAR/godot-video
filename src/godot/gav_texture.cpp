@@ -176,6 +176,12 @@ bool GAVTexture::setup_pipeline(AVPixelFormat pixel_format, AVColorSpace color_s
 				pixel_format == AV_PIX_FMT_P016LE ||
 				pixel_format == AV_PIX_FMT_P010LE) {
 			tex_format = RenderingDevice::DATA_FORMAT_R16_UNORM;
+			log.info("Using 16bit float textures");
+		}else if (pixel_format == AV_PIX_FMT_YUV420P10LE) {
+			log.info("Using 8bit int textures");
+			tex_format = RenderingDevice::DATA_FORMAT_R8_UINT;
+		} else {
+			log.info("Using 8bit float textures");
 		}
 
 		Ref<RDTextureFormat> format;

@@ -134,22 +134,35 @@ RID yuv420p10le(RenderingDevice *rd, Vector2i size) {
 		layout(local_size_x = 4, local_size_y = 4, local_size_z = 1) in;
 
 		layout (set=0, binding=0, rgba8) uniform image2D result;
-		layout (set=0, binding=1, r8) readonly uniform image2D Y;
-		layout (set=0, binding=2, r8) readonly uniform image2D U;
-		layout (set=0, binding=3, r8) readonly uniform image2D V;
+		layout (set=0, binding=1, r8ui) readonly uniform uimage2D Y;
+		layout (set=0, binding=2, r8ui) readonly uniform uimage2D U;
+		layout (set=0, binding=3, r8ui) readonly uniform uimage2D V;
+
+		float bit_convert(uint low, uint high){
+			return ((high << 8) | low) / 1023.;
+		}
 
 		// The code we want to execute in each invocation
 		void main() {
 			// gl_LocalInvocationID.xy
 			ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
 
-			ivec2 texel_half = texel / 2;
+			ivec2 texel_half = ivec2(texel.x/2, texel.y/2);
 			ivec2 texel_u = texel_half;
 			ivec2 texel_v = texel_half;
 
-			float y = imageLoad(Y, texel).r;
-			float u = imageLoad(U, texel_u).r;
-			float v = imageLoad(V, texel_v).r;
+			//float y = imageLoad(Y, ivec2(texel.x*2, texel.y)).r;
+			uint y1 = imageLoad(Y, ivec2(texel.x*2, texel.y)).r;
+			uint y2 = imageLoad(Y, ivec2(texel.x*2 + 1, texel.y)).r;
+			float y = bit_convert(y1, y2);
+
+			uint u1 = imageLoad(U, ivec2(texel_u.x*2, texel_u.y)).r;
+			uint u2 = imageLoad(U, ivec2(texel_u.x*2+1, texel_u.y)).r;
+			float u = bit_convert(u1, u2);
+
+			uint v1 = imageLoad(V, ivec2(texel_v.x*2, texel_v.y)).r;
+			uint v2 = imageLoad(V, ivec2(texel_v.x*2+1, texel_v.y)).r;
+			float v = bit_convert(v1, v2);
 
 
 			mat3 color_matrix = mat3(
@@ -159,7 +172,7 @@ RID yuv420p10le(RenderingDevice *rd, Vector2i size) {
 			);
 
 			vec3 rgb = vec3(y,u-.5,v-.5) * color_matrix;
-			//vec3 rgb = vec3(u, u, u);
+			//vec3 rgb = vec3(y, y, y);
 			imageStore(result, texel, vec4(rgb, 1));
 		}
 	)";

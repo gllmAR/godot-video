@@ -94,7 +94,13 @@ struct AvAudioFrame : AvBaseFrame {
 
 struct AvWrapperOutputSettings {
 	bool video_hw_enabled = true;
-	AVHWDeviceType video_hw_type = AV_HWDEVICE_TYPE_NONE;
+#ifdef __APPLE__
+	AVHWDeviceType video_hw_type = AV_HWDEVICE_TYPE_VIDEOTOOLBOX;
+#elif defined(BUILD_ANDROID)
+	AVHWDeviceType video_hw_type = AV_HWDEVICE_TYPE_MEDIACODEC;
+#else
+	AVHWDeviceType video_hw_type = AV_HWDEVICE_TYPE_VAAPI;
+#endif
 	int frame_buffer_size = 10;
 	AVSampleFormat audio_sample_fmt = AV_SAMPLE_FMT_FLT;
 	int audio_sample_rate = 0;
@@ -125,6 +131,7 @@ public:
 		PLAY = 1,
 		PAUSE = 2,
 		SHUTDOWN = 3,
+		SEEK = 4,
 	};
 
 private:
@@ -184,6 +191,7 @@ private:
 	// std::atomic_int64_t duration_millis = 0;
 	std::atomic_int64_t position_millis = 0;
 	std::atomic_bool is_eof = false;
+	std::atomic<double> seek_target_seconds = -1.0;
 
 	std::atomic_bool ready_for_playback = false;
 	std::optional<Clock::time_point> start_time = std::nullopt;
@@ -222,6 +230,7 @@ public:
 	void stop();
 	void play();
 	void set_paused(bool state);
+	void seek(double seconds);
 	[[nodiscard]] bool is_playing() const {
 		if (!playing || paused) {
 			return false;

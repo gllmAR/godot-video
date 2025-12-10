@@ -40,8 +40,6 @@ bool GAVPlayback::load(const String &p_path) {
 		thread.join();
 	}
 
-	keep_processing = true;
-
 	auto path_global = ProjectSettings::get_singleton()->globalize_path(p_path);
 	auto splits = path_global.split("/");
 	log.set_name(splits[splits.size() - 1]);
@@ -197,6 +195,16 @@ void GAVPlayback::_stop() {
 	if (!av)
 		return;
 
+	// Signal that audio needs to be reset
+	audio_needs_reset = true;
+	
+	// Clear audio buffers to prevent artifacts
+	{
+		std::scoped_lock lock(audio_mutex);
+		audio_frames_thread.clear();
+		audio_buffer.clear();
+	}
+
 	// if (threaded) {
 	// 	thread_keep_running = false;
 	// 	if (thread.joinable()) {
@@ -208,14 +216,23 @@ void GAVPlayback::_stop() {
 void GAVPlayback::_play() {
 	if (!av)
 		return;
-	keep_processing = true;
+	
+	// Signal that audio should reset
+	audio_needs_reset = true;
+	
+	// Clear audio buffers when starting playback to prevent stale audio
+	{
+		std::scoped_lock lock(audio_mutex);
+		audio_frames_thread.clear();
+		audio_buffer.clear();
+	}
+	
 	av->play();
 }
 
 void GAVPlayback::_set_paused(bool p_paused) {
 	if (!av)
 		return;
-	keep_processing = true;
 	av->set_paused(p_paused);
 }
 
@@ -226,11 +243,11 @@ bool GAVPlayback::_is_paused() const {
 }
 
 bool GAVPlayback::_is_playing() const {
-	// godot video player is a bit weird here imho. is playing should always be true (except on stop), otherwise _update is not being called
-	// if (!av)
-	// 	return false;
-	// return av->is_playing();
-	return keep_processing;
+	if (!av)
+		return false;
+	// Keep returning true even after video finishes so _update() continues
+	// to be called and can handle looping
+	return av->is_playing() || video_finished;
 }
 
 double GAVPlayback::_get_length() const {
@@ -249,6 +266,30 @@ double GAVPlayback::_get_playback_position() const {
 }
 
 void GAVPlayback::_seek(double p_time) {
+	if (!av)
+		return;
+	
+	log.info("Seeking to ", p_time, "s");
+	
+	// Signal that audio needs reset
+	audio_needs_reset = true;
+	
+	// Clear audio buffers during seek to prevent artifacts
+	{
+		std::scoped_lock lock(audio_mutex);
+		audio_frames_thread.clear();
+		audio_buffer.clear();
+	}
+	
+	// Clear video buffers
+	if (threaded) {
+		std::scoped_lock lock(video_mutex);
+		video_frame_thread.reset();
+		video_frames_thread_to_reuse.clear();
+	}
+	
+	// Call the actual seek implementation
+	av->seek(p_time);
 }
 void GAVPlayback::_set_audio_track(int32_t p_idx) {
 }
@@ -280,9 +321,28 @@ int32_t GAVPlayback::_get_mix_rate() const {
 void GAVPlayback::_update(double p_delta) {
 	MEASURE_N("MAIN");
 	if (video_finished) {
-		callbacks.ended();
+		// For seamless looping: seek to beginning instead of finishing
+		log.info("Video finished - restarting for seamless loop");
+		
+		// Signal audio reset to prevent loop artifacts
+		audio_needs_reset = true;
+		
+		// Clear audio buffers when video finishes
+		{
+			std::scoped_lock lock(audio_mutex);
+			audio_frames_thread.clear();
+			audio_buffer.clear();
+		}
+		
+		// Seek back to beginning for seamless loop
+		if (av) {
+			log.info("Seamless loop: seeking to 0 and restarting playback");
+			av->seek(0.0);
+			av->play(); // Restart playback after seek
+		}
+		
 		video_finished = false;
-		keep_processing = false;
+		// Don't call callbacks.ended() - this prevents Godot from recreating playback
 	}
 
 	if (threaded) {
@@ -302,14 +362,19 @@ void GAVPlayback::_update(double p_delta) {
 			}
 		}
 		{
-			// TODO: audio
+			// Audio processing with reset handling
 			std::deque<AvAudioFrame> audio_frames;
 			{
 				std::scoped_lock lock(audio_mutex);
-				if (!audio_frames_thread.empty()) {
+				// If audio needs reset, discard all queued frames
+				if (audio_needs_reset) {
+					audio_frames_thread.clear();
+					audio_buffer.clear();
+					audio_needs_reset = false;
+				} else if (!audio_frames_thread.empty()) {
 					audio_frames.insert(audio_frames.end(), audio_frames_thread.begin(), audio_frames_thread.end());
+					audio_frames_thread.clear();
 				}
-				audio_frames_thread.clear();
 			}
 			if (!audio_frames.empty()) {
 				for (const auto &f : audio_frames) {

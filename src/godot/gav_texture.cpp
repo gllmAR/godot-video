@@ -177,7 +177,7 @@ bool GAVTexture::setup_pipeline(AVPixelFormat pixel_format, AVColorSpace color_s
 				pixel_format == AV_PIX_FMT_P010LE) {
 			tex_format = RenderingDevice::DATA_FORMAT_R16_UNORM;
 			log.info("Using 16bit float textures");
-		}else if (pixel_format == AV_PIX_FMT_YUV420P10LE) {
+		}else if (pixel_format == AV_PIX_FMT_YUV420P10LE || pixel_format == AV_PIX_FMT_YUV422P10LE) {
 			log.info("Using 8bit int textures");
 			tex_format = RenderingDevice::DATA_FORMAT_R8_UINT;
 		} else {
@@ -209,7 +209,7 @@ bool GAVTexture::setup_pipeline(AVPixelFormat pixel_format, AVColorSpace color_s
 		}
 		plane_textures.push_back(rid);
 
-		log.verbose("created plane - size: ", plane.width, "x", plane.height, ", byte_size: ", plane.byte_size, ",  line_size: ", plane.line_size);
+		log.verbose("created plane - size: ", plane.width, "x", plane.height, ", byte_size: ", (int64_t)plane.byte_size, ",  line_size: ", plane.line_size);
 	}
 
 	// // create the compute shader
@@ -224,6 +224,8 @@ bool GAVTexture::setup_pipeline(AVPixelFormat pixel_format, AVColorSpace color_s
 		conversion_shader = p016le(conversion_rd, size);
 	} else if (pixel_format == AV_PIX_FMT_YUV420P10LE) {
 		conversion_shader = yuv420p10le(conversion_rd, size);
+	} else if (pixel_format == AV_PIX_FMT_YUV422P10LE) {
+		conversion_shader = yuv422p10le(conversion_rd, size);
 	} else {
 		UtilityFunctions::printerr("unsupported pixel format: ", av_get_pix_fmt_name(pixel_format));
 	}

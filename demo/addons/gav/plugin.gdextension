@@ -31,6 +31,12 @@ linux.x86_64.single.release = "./linux/libgav.linux.template_debug.x86_64.so"
 ;linux.rv64.double.debug = "./linux/gav.linux.template_debug.rv64.double.so"
 ;linux.rv64.single.release = "./linux/gav.linux.template_release.rv64.so"
 ;linux.rv64.double.release = "./linux/gav.linux.template_release.rv64.double.so"
+
+macos.arm64.single.debug = "./macos/libgav.macos.template_debug.arm64.dylib"
+macos.arm64.single.release = "./macos/libgav.macos.template_release.arm64.dylib"
+macos.x86_64.single.debug = "./macos/libgav.macos.template_debug.x86_64.dylib"
+macos.x86_64.single.release = "./macos/libgav.macos.template_release.x86_64.dylib"
+
 ;
 android.x86_64.single.debug = "res://addons/gav/android/libgav.android.template_debug.x86_64.so"
 ;android.x86_64.double.debug = "./android/gav.android.template_debug.x86_64.double.so"

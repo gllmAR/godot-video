@@ -38,7 +38,10 @@ message("CXX COMPILER SET TO ${CMAKE_CXX_COMPILER}")
 find_package(Python3 3.4 REQUIRED)
 find_program(GIT git REQUIRED)
 
-set(CMAKE_SHARED_LINKER_FLAGS "-Wl,-Bsymbolic")
+# -Bsymbolic is Linux-specific and not supported on macOS
+if(NOT APPLE)
+    set(CMAKE_SHARED_LINKER_FLAGS "-Wl,-Bsymbolic")
+endif()
 
 set(LIBS_INSTALL ${CMAKE_BINARY_DIR}/libs)
 set(LIBS_INCLUDE ${LIBS_INSTALL}/include)
@@ -234,8 +237,24 @@ if (NOT BUILD_ANDROID)
     # set(FFMPEG_CONFIG --enable-shared --enable-libaom --enable-gpl --enable-gnutls --enable-libass --enable-libfdk-aac --enable-libfreetype --enable-libmp3lame --enable-libopus --enable-libsvtav1 --enable-libdav1d --enable-libvorbis --enable-libvpx --enable-libx264 --enable-libx265 --enable-nonfree)
     # potentially enable  --enable-libass  --enable-libfreetype => subtitles |  --enable-libdav1d av1 decode | --enable-libopus opus audio | --enable-libvpx VP8/VP9 |  --enable-libfdk-aac AAC Audio |  --enable-libvorbis  vorbis audio |  --enable-libmp3lame mp3 audio
     # --enable-cuda-sdk  --enable-nvenc --enable-ffnvcodec
-    set(FFMPEG_CONFIG --enable-gpl --enable-libx264 --enable-libx265 --enable-nonfree --enable-vaapi
-            --enable-rpath --enable-ffplay --disable-cuda-sdk --disable-cuda-nvcc)
+    
+    # Platform-specific FFmpeg configuration
+    if (APPLE)
+        message("Configuring FFmpeg for macOS with VideoToolbox")
+        set(FFMPEG_CONFIG --enable-gpl --enable-libx264 --enable-libx265 --enable-nonfree 
+                --enable-videotoolbox --enable-audiotoolbox
+                --enable-rpath --disable-cuda-sdk --disable-cuda-nvcc)
+    elseif (BUILD_ANDROID)
+        message("Configuring FFmpeg for Android with MediaCodec")
+        set(FFMPEG_CONFIG --enable-gpl --enable-libx264 --enable-libx265 --enable-nonfree 
+                --enable-mediacodec
+                --enable-rpath --disable-cuda-sdk --disable-cuda-nvcc)
+    else()
+        message("Configuring FFmpeg for Linux with VAAPI")
+        set(FFMPEG_CONFIG --enable-gpl --enable-libx264 --enable-libx265 --enable-nonfree --enable-vaapi
+                --enable-rpath --enable-ffplay --disable-cuda-sdk --disable-cuda-nvcc)
+    endif()
+    
     if (CMAKE_BUILD_TYPE STREQUAL "Debug")
         message("Enable ffmpeg debug build")
         set(FFMPEG_CONFIG ${FFMPEG_CONFIG} --enable-debug=3 --disable-optimizations --disable-stripping)
@@ -385,6 +404,21 @@ if (BUILD_ANDROID)
     target_link_libraries(${LIBNAME} PRIVATE godot-cpp gav_jni
             avformat avcodec avdevice avutil avfilter swscale swresample
             vulkan mediandk android z
+    )
+elseif (APPLE AND USE_SYSTEM_FFMPEG)
+    message("-- building for macOS with system ffmpeg")
+    # On macOS, x264/x265 are already linked into FFmpeg dylibs
+    # But we still need standard compression libraries and Apple frameworks
+    target_link_libraries(${LIBNAME} PRIVATE godot-cpp
+            avformat avcodec avdevice avutil avfilter swscale swresample
+            z bz2 lzma iconv
+            "-framework CoreFoundation"
+            "-framework CoreMedia" 
+            "-framework CoreVideo"
+            "-framework VideoToolbox"
+            "-framework AudioToolbox"
+            "-framework Security"
+            "-framework Metal"
     )
 elseif (USE_SYSTEM_FFMPEG)
     message("-- using system ffmpeg")

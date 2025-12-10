@@ -29,6 +29,13 @@ extern "C" {
 }
 #endif
 
+#ifdef __APPLE__
+extern "C" {
+#include <libavcodec/videotoolbox.h>
+#include <libavutil/hwcontext_videotoolbox.h>
+}
+#endif
+
 AvCodecs AvPlayer::codecs;
 
 AvVideoFrame AvVideoFrame::copy(const AvFramePtr &av_frame) const {
@@ -333,6 +340,57 @@ AvCodecContextPtr AvPlayer::create_video_codec_context() {
 //// end android
 #endif
 
+	//// macOS
+#ifdef __APPLE__
+
+	auto videotoolbox_type = av_hwdevice_find_type_by_name("videotoolbox");
+	if (videotoolbox_type != AV_HWDEVICE_TYPE_NONE) {
+		log.info("detected VideoToolbox. device is macOS. will try to create VideoToolbox decoder");
+
+		std::string decoder_name;
+		switch (codec->codec_id) {
+			case AV_CODEC_ID_H264:
+				decoder_name = "h264_videotoolbox";
+				break;
+			case AV_CODEC_ID_HEVC:
+				decoder_name = "hevc_videotoolbox";
+				break;
+			case AV_CODEC_ID_VP9:
+				decoder_name = "vp9_videotoolbox";
+				break;
+			case AV_CODEC_ID_PRORES:
+				decoder_name = "prores_videotoolbox";
+				break;
+			default:
+				log.warn("codec {} not supported by VideoToolbox HW decode", avcodec_get_name(codec->codec_id));
+		}
+
+		if (!decoder_name.empty()) {
+			const AVCodec *vt_codec = avcodec_find_decoder_by_name(decoder_name.c_str());
+			if (!vt_codec) {
+				log.warn("Could not find VideoToolbox decoder '{}'", decoder_name);
+			} else {
+				for (int i = 0;; ++i) {
+					const AVCodecHWConfig *config = avcodec_get_hw_config(vt_codec, i);
+					if (!config) {
+						log.error("Decoder: {} does not support device type: {}", vt_codec->name,
+								av_hwdevice_get_type_name(videotoolbox_type));
+						break;
+					}
+					if (config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX && config->device_type == videotoolbox_type) {
+						auto hw_pix_fmt = config->pix_fmt;
+						log.info("VideoToolbox decoder: {} supports hw_pix_fmt: {}", vt_codec->name,
+								av_get_pix_fmt_name(hw_pix_fmt));
+						hw_configs.push_back(config);
+						break;
+					}
+				}
+			}
+		}
+	}
+//// end macOS
+#endif
+
 	int i = 0;
 	const AVCodecHWConfig *hw_config = nullptr;
 	while ((hw_config = avcodec_get_hw_config(decoder, i++)) != nullptr) {
@@ -440,6 +498,50 @@ AvCodecContextPtr AvPlayer::create_video_codec_context() {
 				}
 #else
 				log.error("hw device type is mediacodec but library is not built for android. this should not happen!");
+				return {};
+#endif
+			} else if (output_settings.video_hw_type == AV_HWDEVICE_TYPE_VIDEOTOOLBOX) {
+#ifdef __APPLE__
+				log.info("Init VideoToolbox hw device on macOS");
+
+				output_settings.video_hw_enabled = true;
+				auto video_hw_frames_ref = av_hwframe_ctx_alloc(hw_device);
+				auto *ctx = reinterpret_cast<AVHWFramesContext *>(video_hw_frames_ref->data);
+				ctx->format = hw_config->pix_fmt;
+				ctx->width = codec->width;
+				ctx->height = codec->height;
+
+				// VideoToolbox typically outputs NV12 for 8-bit or P010 for 10-bit
+				// Query supported formats from hardware
+				AVHWFramesConstraints *hw_frames_const = av_hwdevice_get_hwframe_constraints(hw_device, nullptr);
+				if (hw_frames_const) {
+					for (AVPixelFormat *p = hw_frames_const->valid_sw_formats; *p != AV_PIX_FMT_NONE; p++) {
+						log.verbose("VideoToolbox supported sw pixel format: {}", av_get_pix_fmt_name(*p));
+						if (ctx->sw_format == AV_PIX_FMT_NONE) {
+							ctx->sw_format = *p;
+						}
+					}
+					av_hwframe_constraints_free(&hw_frames_const);
+				}
+
+				// Fallback to NV12 if no format detected
+				if (ctx->sw_format == AV_PIX_FMT_NONE) {
+					ctx->sw_format = AV_PIX_FMT_NV12;
+				}
+
+				log.info("VideoToolbox using sw pixel format: {}", av_get_pix_fmt_name(ctx->sw_format));
+
+				if (!ff_ok(av_hwframe_ctx_init(video_hw_frames_ref))) {
+					log.error("Could not initialize VideoToolbox hw frame");
+					av_buffer_unref(&video_hw_frames_ref);
+					codec->hw_device_ctx = nullptr;
+				} else {
+					codec->hw_device_ctx = hw_device;
+					codec->hw_frames_ctx = video_hw_frames_ref;
+					log.info("VideoToolbox hw device initialized successfully");
+				}
+#else
+				log.error("hw device type is videotoolbox but library is not built for macOS!");
 				return {};
 #endif
 			} else {
@@ -760,6 +862,11 @@ void AvPlayer::set_paused(bool state) {
 		play();
 	}
 }
+void AvPlayer::seek(double seconds) {
+	log.info("seek to {}s", seconds);
+	seek_target_seconds = seconds;
+	add_command(SEEK);
+}
 
 void AvPlayer::fill_buffers() {
 	MEASURE;
@@ -856,6 +963,9 @@ void AvPlayer::add_command(Command command) {
 		case SHUTDOWN:
 			log.verbose("add_command: SHUTDOWN");
 			break;
+		case SEEK:
+			log.verbose("add_command: SEEK");
+			break;
 	}
 	std::unique_lock lock(command_queue_mutex);
 	if (num_commands >= command_queue.size()) {
@@ -910,6 +1020,45 @@ void AvPlayer::handle_commands() {
 				log.info("shutdown");
 				reset();
 				load_settings = {};
+			break;
+		case SEEK: {
+			double target = seek_target_seconds.load();
+			if (target < 0.0 || !fmt_ctx) {
+				log.warn("invalid seek target or no format context");
+				break;
+			}
+			log.info("seeking to {}s", target);
+			
+			// Convert target time to timestamp
+			int64_t target_ts = static_cast<int64_t>(target * AV_TIME_BASE);
+			
+			// Seek in the file
+			int ret = avformat_seek_file(fmt_ctx, -1, INT64_MIN, target_ts, INT64_MAX, 0);
+			if (ret < 0) {
+				log.error("avformat_seek_file failed: {}", av_error_string(ret));
+				break;
+			}
+			
+			// Flush codec buffers
+			if (video_codec) {
+				avcodec_flush_buffers(video_codec.get());
+			}
+			if (audio_codec) {
+				avcodec_flush_buffers(audio_codec.get());
+			}
+			
+			// Clear our frame buffers
+			video_frames.clear();
+			audio_frames.clear();
+			
+			// Reset timing
+			start_time.reset();
+			position_millis = static_cast<int64_t>(target * 1000.0);
+			is_eof = false;
+			
+			log.info("seek completed to {}s", target);
+			break;
+		}
 		}
 	}
 }

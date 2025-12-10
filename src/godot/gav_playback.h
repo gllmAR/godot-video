@@ -33,6 +33,7 @@ class GAVPlayback : public godot::VideoStreamPlayback {
 	std::mutex audio_mutex;
 	std::mutex video_mutex;
 	std::atomic_bool keep_processing = false;
+	std::atomic_bool audio_needs_reset = false;
 	std::optional<AvVideoFrame> video_frame_thread;
 	std::deque<AvVideoFrame> video_frames_thread_to_reuse;
 	std::deque<AvAudioFrame> audio_frames_thread;

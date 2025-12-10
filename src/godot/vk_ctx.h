@@ -3,6 +3,9 @@
 //
 
 #pragma once
+
+#ifndef __APPLE__
+
 #include <godot_cpp/classes/rendering_device.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
 
@@ -15,3 +18,5 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vk_proc_addr(VkInstance instance, const
 bool av_vk_video_supported(godot::RenderingDevice *rd);
 bool av_vk_ctx_setup(AVVulkanDeviceContext *ctx, godot::RenderingDevice *rd);
 AVBufferRef *av_vk_create_device(godot::RenderingDevice *rd = godot::RenderingServer::get_singleton()->get_rendering_device());
+
+#endif // !__APPLE__

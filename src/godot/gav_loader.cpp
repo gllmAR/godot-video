@@ -19,7 +19,7 @@ godot::Variant GAVLoader::_load(const godot::String &p_path, const godot::String
 
 PackedStringArray GAVLoader::_get_recognized_extensions() const {
 	static const PackedStringArray extensions = {
-		"mkv", "avi", "gif", "mp4", "mov"
+		"mkv", "avi", "gif", "mp4", "mov", "webm", "ogg", "ogv", "m4v", "3gp", "flv", "wmv", "mpg", "mpeg"
 	};
 	return extensions;
 }

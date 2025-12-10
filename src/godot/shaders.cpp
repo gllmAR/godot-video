@@ -185,6 +185,58 @@ RID yuv420p10le(RenderingDevice *rd, Vector2i size) {
 	// return cache;
 }
 
+RID yuv422p10le(RenderingDevice *rd, Vector2i size) {
+	String s = R"(
+		#version 450
+
+		// Invocations in the (x, y, z) dimension
+		layout(local_size_x = 4, local_size_y = 4, local_size_z = 1) in;
+
+		layout (set=0, binding=0, rgba8) uniform image2D result;
+		layout (set=0, binding=1, r8ui) readonly uniform uimage2D Y;
+		layout (set=0, binding=2, r8ui) readonly uniform uimage2D U;
+		layout (set=0, binding=3, r8ui) readonly uniform uimage2D V;
+
+		float bit_convert(uint low, uint high){
+			return ((high << 8) | low) / 1023.;
+		}
+
+		// The code we want to execute in each invocation
+		void main() {
+			ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+
+			// YUV422 has full vertical resolution but half horizontal chroma
+			ivec2 texel_chroma = ivec2(texel.x/2, texel.y);
+
+			// Read 10-bit Y (2 bytes per component)
+			uint y1 = imageLoad(Y, ivec2(texel.x*2, texel.y)).r;
+			uint y2 = imageLoad(Y, ivec2(texel.x*2 + 1, texel.y)).r;
+			float y = bit_convert(y1, y2);
+
+			// Read 10-bit U (2 bytes per component)
+			uint u1 = imageLoad(U, ivec2(texel_chroma.x*2, texel_chroma.y)).r;
+			uint u2 = imageLoad(U, ivec2(texel_chroma.x*2+1, texel_chroma.y)).r;
+			float u = bit_convert(u1, u2);
+
+			// Read 10-bit V (2 bytes per component)
+			uint v1 = imageLoad(V, ivec2(texel_chroma.x*2, texel_chroma.y)).r;
+			uint v2 = imageLoad(V, ivec2(texel_chroma.x*2+1, texel_chroma.y)).r;
+			float v = bit_convert(v1, v2);
+
+			mat3 color_matrix = mat3(
+				1,   0,       1.402,
+				1,  -0.344,  -0.714,
+				1,   1.772,   0
+			);
+
+			vec3 rgb = vec3(y,u-.5,v-.5) * color_matrix;
+			imageStore(result, texel, vec4(rgb, 1));
+		}
+	)";
+
+	return compile_shader(rd, s, "yuv422p10le");
+}
+
 RID nv12(RenderingDevice *rd, Vector2i size) {
 	// static RID cache = {};
 	// if (cache.is_valid()) {

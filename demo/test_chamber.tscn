@@ -1,0 +1,100 @@
+[gd_scene load_steps=2 format=3 uid="uid://cy3d7mk3a8gxw"]
+
+[ext_resource type="Script" path="res://test_chamber.gd" id="1_test_chamber"]
+
+[node name="TestChamber" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_test_chamber")
+
+[node name="VBoxContainer" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="TopPanel" type="HBoxContainer" parent="VBoxContainer"]
+layout_mode = 2
+
+[node name="Title" type="Label" parent="VBoxContainer/TopPanel"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"HeaderLarge"
+text = "GAV Test Chamber"
+
+[node name="StatusLabel" type="Label" parent="VBoxContainer/TopPanel"]
+layout_mode = 2
+text = "Loading..."
+
+[node name="HWAccelCheck" type="CheckButton" parent="VBoxContainer/TopPanel"]
+layout_mode = 2
+button_pressed = true
+text = "HW Accel"
+
+[node name="LoopCheck" type="CheckButton" parent="VBoxContainer/TopPanel"]
+layout_mode = 2
+text = "Loop"
+
+[node name="HSplitContainer" type="HSplitContainer" parent="VBoxContainer"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="FilePanel" type="PanelContainer" parent="VBoxContainer/HSplitContainer"]
+custom_minimum_size = Vector2(300, 0)
+layout_mode = 2
+
+[node name="FileTree" type="Tree" parent="VBoxContainer/HSplitContainer/FilePanel"]
+layout_mode = 2
+columns = 2
+column_titles_visible = true
+hide_root = true
+
+[node name="VideoPanel" type="VBoxContainer" parent="VBoxContainer/HSplitContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="VideoPlayer" type="VideoStreamPlayer" parent="VBoxContainer/HSplitContainer/VideoPanel"]
+layout_mode = 2
+size_flags_vertical = 3
+expand_mode = 1
+
+[node name="InfoPanel" type="PanelContainer" parent="VBoxContainer/HSplitContainer/VideoPanel"]
+custom_minimum_size = Vector2(0, 150)
+layout_mode = 2
+
+[node name="InfoLabel" type="RichTextLabel" parent="VBoxContainer/HSplitContainer/VideoPanel/InfoPanel"]
+layout_mode = 2
+bbcode_enabled = true
+text = "[b]Select a test video from the list[/b]"
+fit_content = true
+
+[node name="ControlsPanel" type="HBoxContainer" parent="VBoxContainer"]
+layout_mode = 2
+
+[node name="PlayButton" type="Button" parent="VBoxContainer/ControlsPanel"]
+layout_mode = 2
+text = "▶ Play"
+
+[node name="PauseButton" type="Button" parent="VBoxContainer/ControlsPanel"]
+layout_mode = 2
+text = "⏸ Pause"
+
+[node name="StopButton" type="Button" parent="VBoxContainer/ControlsPanel"]
+layout_mode = 2
+text = "⏹ Stop"
+
+[node name="ProgressSlider" type="HSlider" parent="VBoxContainer/ControlsPanel"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+
+[node name="TimeLabel" type="Label" parent="VBoxContainer/ControlsPanel"]
+custom_minimum_size = Vector2(80, 0)
+layout_mode = 2
+text = "0:00 / 0:00"

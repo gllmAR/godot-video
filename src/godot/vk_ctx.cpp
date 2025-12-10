@@ -4,6 +4,9 @@
 
 #include "vk_ctx.h"
 
+// Vulkan video extensions are not available on macOS
+#ifndef __APPLE__
+
 #include <vector>
 
 #include <godot_cpp/classes/rendering_server.hpp>
@@ -293,3 +296,5 @@ AVBufferRef *av_vk_create_device(godot::RenderingDevice *rd) {
 	UtilityFunctions::printerr("Failed to create Vulkan FFmpeg HW device.");
 	return nullptr;
 }
+
+#endif // !__APPLE__

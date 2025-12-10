@@ -1,6 +1,51 @@
-## Godot Version
+# Godot Video (GAV) - Hardware-Accelerated Video Playback
 
-### build with system ffmpeg
+A GDExtension for Godot 4.4+ providing hardware-accelerated video decoding using FFmpeg.
+
+## Platform Support
+
+| Platform | API | Codecs | Status |
+|----------|-----|--------|--------|
+| Linux | VAAPI | H.264, HEVC, VP9 | ✅ Stable |
+| Android | MediaCodec | H.264, HEVC | ✅ Stable |
+| macOS | VideoToolbox | H.264, HEVC, VP9, ProRes | ✅ **NEW** |
+
+## Quick Start - Testing
+
+See [TESTING_QUICKSTART.md](TESTING_QUICKSTART.md) for a guide to testing hardware acceleration.
+
+```bash
+# Generate test videos
+./scripts/generate_test_media.sh --quick
+
+# Open Godot, run test_chamber.tscn (F5)
+```
+
+## Build Instructions
+
+### macOS (VideoToolbox)
+
+Requirements:
+- Xcode Command Line Tools
+- Homebrew
+- FFmpeg 8.0+ with VideoToolbox support
+
+```bash
+# Install FFmpeg
+brew install ffmpeg
+
+# Build
+mkdir build-macos
+cd build-macos
+cmake ..
+cmake --build . --target gav
+
+# Library output: demo/addons/gav/macos/libgav.macos.template_debug.arm64.dylib
+```
+
+### Linux (VAAPI)
+
+#### build with system ffmpeg
 
 dependency on ubuntu
 

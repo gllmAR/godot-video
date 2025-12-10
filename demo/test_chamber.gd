@@ -47,7 +47,6 @@ func setup_ui() -> void:
 	file_tree.set_column_expand(1, true)
 	
 	# Setup video player
-	video_player.expand = true
 	video_player.loop = false
 	
 	# Setup controls

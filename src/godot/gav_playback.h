@@ -12,6 +12,9 @@
 #include <memory>
 #include <thread>
 
+// Forward declaration
+class GAVStream;
+
 class GAVPlayback : public godot::VideoStreamPlayback {
 	struct Callbacks {
 		std::function<void()> ended;
@@ -30,6 +33,10 @@ class GAVPlayback : public godot::VideoStreamPlayback {
 	std::thread thread;
 	std::atomic_bool thread_keep_running;
 	std::atomic_bool video_finished;
+	std::atomic_bool loop_enabled = false;
+	
+	// Reference to the stream to check loop property dynamically
+	class GAVStream* stream_ref = nullptr;
 	std::mutex audio_mutex;
 	std::mutex video_mutex;
 	std::atomic_bool keep_processing = false;
@@ -53,6 +60,9 @@ public:
 	Callbacks callbacks;
 
 	bool load(const godot::String &p_path);
+
+	void set_loop(bool p_loop);
+	void set_stream_ref(class GAVStream* stream) { stream_ref = stream; }
 
 	void _stop() override;
 	void _play() override;

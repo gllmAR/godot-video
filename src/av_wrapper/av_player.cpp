@@ -1007,7 +1007,8 @@ void AvPlayer::handle_commands() {
 				break;
 			case PLAY:
 				log.info("play");
-				if (!filepath_loaded && !load_settings.file_path.empty() || is_eof) {
+				// Only reload if file is not loaded AND not at EOF (EOF is handled by looping logic)
+				if (!filepath_loaded && !load_settings.file_path.empty() && !is_eof) {
 					log.info("file is not loaded. try to load {}", load_settings.file_path);
 					load(load_settings);
 				} else if (paused && start_time.has_value()) {

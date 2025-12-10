@@ -19,10 +19,16 @@ extends Control
 const TEST_MEDIA_DIR = "res://test_media"
 const DEMO_MEDIA_DIR = "res://"
 
+enum PlaybackState {
+	STOPPED,     # No video loaded or playback stopped
+	PLAYING,     # Video is actively playing
+	PAUSED       # Video is paused
+}
+
 var current_file: String = ""
 var test_media_files: Array[Dictionary] = []
 var is_seeking: bool = false
-var playback_started: bool = false
+var playback_state: PlaybackState = PlaybackState.STOPPED
 
 func _ready() -> void:
 	setup_ui()
@@ -50,8 +56,16 @@ func setup_ui() -> void:
 	# Setup video player
 	video_player.loop = false
 	
-	# Setup controls
+	# Setup controls and tooltips
 	progress_slider.editable = false
+	progress_slider.step = 0.01  # Smooth seeking with small steps
+	progress_slider.scrollable = false  # Prevent accidental scroll wheel seeks
+	play_button.tooltip_text = "Play/Pause/Resume (Space)"
+	pause_button.visible = false  # Hidden - play button handles pause
+	stop_button.tooltip_text = "Stop (Esc)"
+	progress_slider.tooltip_text = "Seek through video (←/→ for ±5s)"
+	loop_check.tooltip_text = "Loop playback (Shift+L)"
+	
 	update_controls_state()
 
 func scan_test_media() -> void:
@@ -177,11 +191,48 @@ func connect_signals() -> void:
 	play_button.pressed.connect(_on_play_pressed)
 	pause_button.pressed.connect(_on_pause_pressed)
 	stop_button.pressed.connect(_on_stop_pressed)
-	progress_slider.value_changed.connect(_on_progress_changed)
-	progress_slider.drag_started.connect(func(): is_seeking = true)
-	progress_slider.drag_ended.connect(func(_value_changed): is_seeking = false)
+	progress_slider.value_changed.connect(_on_progress_value_changed)
+	progress_slider.drag_started.connect(_on_progress_drag_started)
+	progress_slider.drag_ended.connect(_on_progress_drag_ended)
 	hw_accel_check.toggled.connect(_on_hw_accel_toggled)
 	loop_check.toggled.connect(_on_loop_toggled)
+
+func _input(event: InputEvent) -> void:
+	# Keyboard shortcuts for playback control
+	if event is InputEventKey and event.pressed and not event.echo:
+		match event.keycode:
+			KEY_SPACE:
+				# Space bar: play/pause/resume toggle
+				_on_play_pressed()
+				accept_event()
+			KEY_ESCAPE:
+				# ESC stops playback
+				if playback_state != PlaybackState.STOPPED:
+					_on_stop_pressed()
+				accept_event()
+			KEY_LEFT:
+				# Left arrow: seek backward 5 seconds
+				if video_player.stream != null and playback_state != PlaybackState.STOPPED:
+					var current_pos = video_player.stream_position
+					var new_pos = max(0.0, current_pos - 5.0)
+					video_player.stream_position = new_pos
+					progress_slider.value = new_pos
+					accept_event()
+			KEY_RIGHT:
+				# Right arrow: seek forward 5 seconds
+				if video_player.stream != null and playback_state != PlaybackState.STOPPED:
+					var current_pos = video_player.stream_position
+					var length = video_player.get_stream_length()
+					var new_pos = min(length, current_pos + 5.0)
+					video_player.stream_position = new_pos
+					progress_slider.value = new_pos
+					accept_event()
+			KEY_L:
+				# L key toggles loop
+				if event.shift_pressed:
+					loop_check.button_pressed = not loop_check.button_pressed
+					_on_loop_toggled(loop_check.button_pressed)
+					accept_event()
 
 func _on_file_tree_item_activated() -> void:
 	var selected = file_tree.get_selected()
@@ -195,15 +246,23 @@ func _on_file_tree_item_activated() -> void:
 	load_and_play_video(file_info.path)
 
 func load_and_play_video(path: String) -> void:
-	stop_video()
+	# Stop any existing playback
+	if playback_state != PlaybackState.STOPPED:
+		stop_video()
+	
 	current_file = path
 	
 	var stream = load(path) as GAVStream
 	if stream == null:
 		update_info("❌ Failed to load: " + path.get_file())
+		playback_state = PlaybackState.STOPPED
+		update_controls_state()
 		return
 	
 	video_player.stream = stream
+	
+	# Set loop on the stream so it's passed to playback
+	stream.loop = loop_check.button_pressed
 	video_player.loop = loop_check.button_pressed
 	
 	# Set aspect ratio based on video dimensions
@@ -217,38 +276,93 @@ func load_and_play_video(path: String) -> void:
 	if not stream.finished.is_connected(_on_video_finished):
 		stream.finished.connect(_on_video_finished)
 	
+	# Start playback
+	video_player.paused = false
 	video_player.play()
-	playback_started = true
+	playback_state = PlaybackState.PLAYING
 	
 	update_info("▶ Playing: " + path.get_file())
 	update_controls_state()
 
 func stop_video() -> void:
-	if video_player.is_playing():
+	if video_player.stream != null:
 		video_player.stop()
-	playback_started = false
+		# Don't clear the stream - keep it loaded so we can replay
+		# video_player.stream = null
+	playback_state = PlaybackState.STOPPED
+	progress_slider.value = 0
+	time_label.text = "0:00 / 0:00"
 	update_controls_state()
 
+func _on_video_finished() -> void:
+	# This signal is emitted when loop is disabled and video reaches the end
+	print("Video finished signal received")
+	# Video has ended, update state
+	if not video_player.loop:
+		playback_state = PlaybackState.STOPPED
+		update_controls_state()
+		update_info("✓ Playback finished")
+
 func _on_play_pressed() -> void:
-	if current_file.is_empty():
-		return
-	
-	if not playback_started:
+	if playback_state == PlaybackState.STOPPED:
+		# Start new playback or replay
+		if current_file.is_empty():
+			return
 		load_and_play_video(current_file)
-	else:
+	elif playback_state == PlaybackState.PAUSED:
+		# Resume from pause
 		video_player.paused = false
+		playback_state = PlaybackState.PLAYING
+		update_info("▶ Resumed")
+		update_controls_state()
+	elif playback_state == PlaybackState.PLAYING:
+		# Pause the video
+		video_player.paused = true
+		playback_state = PlaybackState.PAUSED
+		update_info("⏸ Paused")
+		update_controls_state()
 
 func _on_pause_pressed() -> void:
-	if video_player.is_playing():
+	# This button is now hidden, but keep the handler for compatibility
+	if playback_state == PlaybackState.PLAYING:
 		video_player.paused = true
+		playback_state = PlaybackState.PAUSED
+		update_info("⏸ Paused")
+		update_controls_state()
+	elif playback_state == PlaybackState.PAUSED:
+		video_player.paused = false
+		playback_state = PlaybackState.PLAYING
+		update_info("▶ Resumed")
+		update_controls_state()
 
 func _on_stop_pressed() -> void:
 	stop_video()
 	update_info("⏹ Stopped")
 
-func _on_progress_changed(value: float) -> void:
+func _on_progress_drag_started() -> void:
+	is_seeking = true
+
+func _on_progress_drag_ended(_value_changed: bool) -> void:
+	is_seeking = false
+	# Apply the final seek position when drag ends
+	if video_player.stream != null and playback_state != PlaybackState.STOPPED:
+		video_player.stream_position = progress_slider.value
+
+func _on_progress_value_changed(value: float) -> void:
+	# During drag, show preview position in time label
 	if is_seeking and video_player.stream != null:
-		video_player.stream_position = value
+		var length = video_player.get_stream_length()
+		if length > 0:
+			time_label.text = "%s / %s (Seeking)" % [
+				_format_time(value),
+				_format_time(length)
+			]
+	# If not dragging but slider was clicked, seek immediately
+	elif not is_seeking and video_player.stream != null and playback_state != PlaybackState.STOPPED:
+		# Check if this is a user click (not from _process update)
+		var current_pos = video_player.stream_position
+		if abs(value - current_pos) > 0.5:  # Threshold to distinguish user input from _process updates
+			video_player.stream_position = value
 
 func _on_hw_accel_toggled(enabled: bool) -> void:
 	# Note: Hardware acceleration preference would need to be set before loading
@@ -257,21 +371,31 @@ func _on_hw_accel_toggled(enabled: bool) -> void:
 
 func _on_loop_toggled(enabled: bool) -> void:
 	video_player.loop = enabled
-
-func _on_video_finished() -> void:
-	if not loop_check.button_pressed:
-		playback_started = false
-		update_controls_state()
-		update_info("✓ Playback finished")
+	# Update the stream's loop property if video is loaded
+	if video_player.stream:
+		video_player.stream.loop = enabled
+	update_info(("🔁 Loop: Enabled" if enabled else "➡ Loop: Disabled"))
 
 func update_controls_state() -> void:
 	var has_stream = video_player.stream != null
-	var is_playing = video_player.is_playing()
 	
-	play_button.disabled = not has_stream or (is_playing and not video_player.paused)
-	pause_button.disabled = not is_playing or video_player.paused
-	stop_button.disabled = not has_stream or not playback_started
-	progress_slider.editable = has_stream
+	# Play/Pause button changes based on state
+	play_button.disabled = not has_stream
+	if playback_state == PlaybackState.PLAYING:
+		play_button.text = "⏸ Pause"
+	elif playback_state == PlaybackState.PAUSED:
+		play_button.text = "▶ Resume"
+	else:  # STOPPED
+		play_button.text = "▶ Play"
+	
+	# Hide the separate pause button - play button handles it
+	pause_button.visible = false
+	
+	# Stop button: enabled when playing or paused
+	stop_button.disabled = playback_state == PlaybackState.STOPPED
+	
+	# Slider: editable when we have a stream and not stopped
+	progress_slider.editable = has_stream and playback_state != PlaybackState.STOPPED
 
 func update_info(message: String) -> void:
 	var info_text = "[b]" + message + "[/b]\n\n"
@@ -288,18 +412,27 @@ func update_info(message: String) -> void:
 	info_label.text = info_text
 
 func _process(_delta: float) -> void:
-	if video_player.is_playing() and not is_seeking:
+	# Only update progress slider when not seeking
+	if not is_seeking and video_player.stream != null:
 		var pos = video_player.stream_position
 		var length = video_player.get_stream_length()
 		
 		if length > 0:
 			progress_slider.max_value = length
+			# Only update slider value if we're not actively seeking
 			progress_slider.value = pos
 			
-			time_label.text = "%s / %s" % [
-				_format_time(pos),
-				_format_time(length)
-			]
+			# Update time label based on state
+			if playback_state == PlaybackState.PLAYING:
+				time_label.text = "%s / %s" % [
+					_format_time(pos),
+					_format_time(length)
+				]
+			elif playback_state == PlaybackState.PAUSED:
+				time_label.text = "%s / %s (Paused)" % [
+					_format_time(pos),
+					_format_time(length)
+				]
 
 func _format_time(seconds: float) -> String:
 	var mins = int(seconds) / 60

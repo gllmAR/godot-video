@@ -1,6 +1,7 @@
 #include "gav_playback.h"
 #include "gav_settings.h"
 #include "gav_singleton.h"
+#include "gav_stream.h"
 
 #include <condition_variable>
 #include <filesystem>
@@ -14,6 +15,7 @@
 using namespace godot;
 
 void GAVPlayback::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("set_loop", "enabled"), &GAVPlayback::set_loop);
 }
 
 GAVPlayback::GAVPlayback() {
@@ -176,6 +178,11 @@ void GAVPlayback::set_file_info(const AvFileInfo &info) {
 	texture->setup(info.video);
 }
 
+void GAVPlayback::set_loop(bool p_loop) {
+	loop_enabled = p_loop;
+	log.info("Loop set to: ", p_loop);
+}
+
 void GAVPlayback::on_video_frame(const AvVideoFrame &frame) const {
 	MEASURE;
 	// log.info("video");
@@ -217,6 +224,9 @@ void GAVPlayback::_play() {
 	if (!av)
 		return;
 	
+	// Clear video_finished flag when resuming/playing
+	video_finished = false;
+	
 	// Signal that audio should reset
 	audio_needs_reset = true;
 	
@@ -233,6 +243,11 @@ void GAVPlayback::_play() {
 void GAVPlayback::_set_paused(bool p_paused) {
 	if (!av)
 		return;
+	// When unpausing, clear video_finished flag
+	if (!p_paused && video_finished) {
+		log.info("Unpausing - clearing video_finished flag");
+		video_finished = false;
+	}
 	av->set_paused(p_paused);
 }
 
@@ -245,9 +260,14 @@ bool GAVPlayback::_is_paused() const {
 bool GAVPlayback::_is_playing() const {
 	if (!av)
 		return false;
-	// Keep returning true even after video finishes so _update() continues
-	// to be called and can handle looping
-	return av->is_playing() || video_finished;
+	// Check the stream's loop property dynamically if available
+	bool should_loop = loop_enabled;
+	if (stream_ref) {
+		should_loop = stream_ref->get_loop();
+	}
+	// Keep returning true if loop is enabled and video finished
+	// so _update() continues to be called for seamless looping
+	return av->is_playing() || (should_loop && video_finished);
 }
 
 double GAVPlayback::_get_length() const {
@@ -321,28 +341,52 @@ int32_t GAVPlayback::_get_mix_rate() const {
 void GAVPlayback::_update(double p_delta) {
 	MEASURE_N("MAIN");
 	if (video_finished) {
-		// For seamless looping: seek to beginning instead of finishing
-		log.info("Video finished - restarting for seamless loop");
-		
-		// Signal audio reset to prevent loop artifacts
-		audio_needs_reset = true;
-		
-		// Clear audio buffers when video finishes
-		{
-			std::scoped_lock lock(audio_mutex);
-			audio_frames_thread.clear();
-			audio_buffer.clear();
+		// Check the stream's loop property dynamically if available
+		bool should_loop = loop_enabled;
+		if (stream_ref) {
+			should_loop = stream_ref->get_loop();
 		}
 		
-		// Seek back to beginning for seamless loop
-		if (av) {
-			log.info("Seamless loop: seeking to 0 and restarting playback");
-			av->seek(0.0);
-			av->play(); // Restart playback after seek
+		if (should_loop) {
+			// Seamless looping: seek to beginning and continue
+			log.info("Video finished - seamless loop enabled, restarting");
+			
+			// Signal audio reset to prevent loop artifacts
+			audio_needs_reset = true;
+			
+			// Clear audio buffers when looping
+			{
+				std::scoped_lock lock(audio_mutex);
+				audio_frames_thread.clear();
+				audio_buffer.clear();
+			}
+			
+			// Seek back to beginning for seamless loop
+			if (av) {
+				av->seek(0.0);
+				av->play();
+			}
+			
+			video_finished = false;
+		} else {
+			// Loop disabled - emit finished signal and stop
+			log.info("Video finished - loop disabled, emitting signal");
+			
+			// Clear audio buffers when video finishes
+			{
+				std::scoped_lock lock(audio_mutex);
+				audio_frames_thread.clear();
+				audio_buffer.clear();
+			}
+			
+			video_finished = false;
+			
+			// Emit finished signal
+			if (callbacks.ended) {
+				callbacks.ended();
+			}
+			return;
 		}
-		
-		video_finished = false;
-		// Don't call callbacks.ended() - this prevents Godot from recreating playback
 	}
 
 	if (threaded) {

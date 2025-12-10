@@ -3,7 +3,8 @@ extends Control
 ## Allows browsing and playing test videos to validate hardware acceleration
 
 @onready var file_tree: Tree = $VBoxContainer/HSplitContainer/FilePanel/FileTree
-@onready var video_player: VideoStreamPlayer = $VBoxContainer/HSplitContainer/VideoPanel/VideoPlayer
+@onready var aspect_container: AspectRatioContainer = $VBoxContainer/HSplitContainer/VideoPanel/AspectContainer
+@onready var video_player: VideoStreamPlayer = $VBoxContainer/HSplitContainer/VideoPanel/AspectContainer/VideoPlayer
 @onready var info_label: RichTextLabel = $VBoxContainer/HSplitContainer/VideoPanel/InfoPanel/InfoLabel
 @onready var controls_panel: HBoxContainer = $VBoxContainer/ControlsPanel
 @onready var play_button: Button = $VBoxContainer/ControlsPanel/PlayButton
@@ -204,6 +205,13 @@ func load_and_play_video(path: String) -> void:
 	
 	video_player.stream = stream
 	video_player.loop = loop_check.button_pressed
+	
+	# Set aspect ratio based on video dimensions
+	var texture = video_player.get_video_texture()
+	if texture:
+		var size = texture.get_size()
+		if size.y > 0:
+			aspect_container.ratio = size.x / size.y
 	
 	# Connect finished signal
 	if not stream.finished.is_connected(_on_video_finished):

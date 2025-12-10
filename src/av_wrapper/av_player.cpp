@@ -779,6 +779,8 @@ bool AvPlayer::read_next_frames() {
 	}
 
 	if (!ff_ok(avcodec_send_packet(codec.get(), packet.get()), "avcodec_send_packet")) {
+		// For certain codecs like AV1, invalid data packets may occur but decoder can recover
+		// Continue processing to attempt recovery
 		return false;
 	}
 

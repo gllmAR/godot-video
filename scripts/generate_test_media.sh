@@ -81,7 +81,8 @@ FONTFILE=$(detect_font)
 # Check encoder availability
 # ---------------------------------------------------------------------------
 has_encoder() {
-    ffmpeg -hide_banner -encoders 2>/dev/null | grep -q " $1 "
+    # PIPESTATUS[1] checks grep's exit code to handle SIGPIPE from grep -q
+    ffmpeg -hide_banner -encoders 2>/dev/null | grep -q " $1 " || [[ ${PIPESTATUS[1]} == 0 ]]
 }
 
 # ---------------------------------------------------------------------------
